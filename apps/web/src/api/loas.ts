@@ -1,7 +1,7 @@
 import api from './axios';
 import type { Loa, PaginatedResponse } from '@gupta/shared';
 import type { CreateLoaInput, UpdateLoaInput } from '@gupta/shared';
-import { MAX_UPLOAD_BYTES } from '@/lib/uploadLimits';
+import { uploadAttachmentDirect } from '@/lib/directUpload';
 
 export const loasApi = {
   list: (params?: Record<string, unknown>) =>
@@ -11,18 +11,12 @@ export const loasApi = {
   update: (id: string, data: UpdateLoaInput) =>
     api.patch<Loa>(`/loas/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/loas/${id}`).then((r) => r.data),
-  uploadAttachment: (id: string, file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    return api
-      .post<Loa>(`/loas/${id}/attachments`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 120_000,
-        maxBodyLength: MAX_UPLOAD_BYTES,
-        maxContentLength: MAX_UPLOAD_BYTES,
-      })
-      .then((r) => r.data);
-  },
+  uploadAttachment: (id: string, file: File) =>
+    uploadAttachmentDirect<Loa>(file, {
+      presign: (body) => api.post(`/loas/${id}/attachments/presign`, body).then((r) => r.data),
+      complete: (body) =>
+        api.post(`/loas/${id}/attachments/complete`, body).then((r) => r.data),
+    }),
   deleteAttachment: (id: string, attId: string) =>
     api.delete<Loa>(`/loas/${id}/attachments/${attId}`).then((r) => r.data),
 };

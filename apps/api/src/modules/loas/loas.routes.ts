@@ -4,6 +4,8 @@ import {
   createLoaSchema,
   updateLoaSchema,
   loaFilterSchema,
+  attachmentPresignSchema,
+  attachmentCompleteSchema,
 } from '@gupta/shared';
 import { asyncHandler } from '../../utils/asyncHandler.js';
 import { authenticate } from '../../middleware/auth.js';
@@ -22,6 +24,17 @@ router.post('/', validate(createLoaSchema), activityLogger('create', 'Loa'), asy
 router.get('/:id', asyncHandler(ctrl.getById));
 router.patch('/:id', validate(updateLoaSchema), activityLogger('update', 'Loa'), asyncHandler(ctrl.update));
 router.delete('/:id', activityLogger('delete', 'Loa'), asyncHandler(ctrl.remove));
+router.post(
+  '/:id/attachments/presign',
+  validate(attachmentPresignSchema),
+  asyncHandler(ctrl.presignAttachment),
+);
+router.post(
+  '/:id/attachments/complete',
+  validate(attachmentCompleteSchema),
+  activityLogger('upload_attachment', 'Loa'),
+  asyncHandler(ctrl.completeAttachment),
+);
 router.post(
   '/:id/attachments',
   upload.single('file'),

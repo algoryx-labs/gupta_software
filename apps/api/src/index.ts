@@ -1,10 +1,12 @@
 import app from './app.js';
 import { env } from './config/env.js';
 import { connectDb } from './config/db.js';
+import { ensureSpacesCors } from './config/storage.js';
 import { logger } from './utils/logger.js';
 
 async function start() {
   await connectDb();
+  await ensureSpacesCors();
 
   app.listen(env.PORT, () => {
     logger.info(`API server running on http://localhost:${env.PORT}`);

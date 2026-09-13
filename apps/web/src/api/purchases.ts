@@ -1,7 +1,7 @@
 import api from './axios';
 import type { Purchase, PaginatedResponse } from '@gupta/shared';
 import type { CreatePurchaseInput, UpdatePurchaseInput } from '@gupta/shared';
-import { MAX_UPLOAD_BYTES } from '@/lib/uploadLimits';
+import { uploadAttachmentDirect } from '@/lib/directUpload';
 
 export const purchasesApi = {
   list: (params?: Record<string, unknown>) =>
@@ -13,18 +13,13 @@ export const purchasesApi = {
   remove: (id: string) => api.delete(`/purchases/${id}`).then((r) => r.data),
   export: (params?: Record<string, unknown>) =>
     api.get<{ data: Purchase[] }>('/purchases/export', { params }).then((r) => r.data),
-  uploadAttachment: (id: string, file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    return api
-      .post<Purchase>(`/purchases/${id}/attachments`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 120_000,
-        maxBodyLength: MAX_UPLOAD_BYTES,
-        maxContentLength: MAX_UPLOAD_BYTES,
-      })
-      .then((r) => r.data);
-  },
+  uploadAttachment: (id: string, file: File) =>
+    uploadAttachmentDirect<Purchase>(file, {
+      presign: (body) =>
+        api.post(`/purchases/${id}/attachments/presign`, body).then((r) => r.data),
+      complete: (body) =>
+        api.post(`/purchases/${id}/attachments/complete`, body).then((r) => r.data),
+    }),
   deleteAttachment: (id: string, attId: string) =>
     api.delete<Purchase>(`/purchases/${id}/attachments/${attId}`).then((r) => r.data),
 };
