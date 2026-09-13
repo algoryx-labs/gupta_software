@@ -13,6 +13,8 @@ interface SearchableSelectProps {
   options: SearchableSelectOption[];
   value: string;
   onChange: (value: string) => void;
+  /** When set, search is driven by the parent (e.g. server-side); local filtering is skipped. */
+  onSearchChange?: (query: string) => void;
   placeholder?: string;
   searchPlaceholder?: string;
   disabled?: boolean;
@@ -29,6 +31,7 @@ export function SearchableSelect({
   options,
   value,
   onChange,
+  onSearchChange,
   placeholder = 'Select...',
   searchPlaceholder = 'Search...',
   disabled = false,
@@ -38,7 +41,13 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
+  const onSearchChangeRef = useRef(onSearchChange);
   const inputId = useId();
+  const serverDriven = Boolean(onSearchChange);
+
+  useEffect(() => {
+    onSearchChangeRef.current = onSearchChange;
+  }, [onSearchChange]);
 
   const selectedOption = useMemo(
     () => options.find((option) => option.value === value),
@@ -53,19 +62,29 @@ export function SearchableSelect({
   const actionOptions = useMemo(() => options.filter(isActionOption), [options]);
 
   const filteredOptions = useMemo(() => {
+    if (serverDriven) {
+      return [...selectableOptions, ...actionOptions];
+    }
+
     const normalized = query.trim().toLowerCase();
     const matched = normalized
       ? selectableOptions.filter((option) => option.label.toLowerCase().includes(normalized))
       : selectableOptions;
 
     return [...matched, ...actionOptions];
-  }, [actionOptions, query, selectableOptions]);
+  }, [actionOptions, query, selectableOptions, serverDriven]);
+
+  const updateQuery = (next: string) => {
+    setQuery(next);
+    onSearchChangeRef.current?.(next);
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setOpen(false);
         setQuery('');
+        onSearchChangeRef.current?.('');
       }
     };
 
@@ -80,7 +99,7 @@ export function SearchableSelect({
 
   const handleClose = () => {
     setOpen(false);
-    setQuery('');
+    updateQuery('');
   };
 
   const handleSelect = (optionValue: string) => {
@@ -91,7 +110,7 @@ export function SearchableSelect({
   const handleClear = (event: React.MouseEvent | React.KeyboardEvent) => {
     event.stopPropagation();
     onChange('');
-    setQuery('');
+    updateQuery('');
   };
 
   return (
@@ -153,7 +172,7 @@ export function SearchableSelect({
                   autoFocus
                   type="text"
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => updateQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Escape') handleClose();
                   }}

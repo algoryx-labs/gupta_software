@@ -240,6 +240,13 @@ export default function PurchasesPage() {
   const [tenderModalOpen, setTenderModalOpen] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [categoryModalItemIndex, setCategoryModalItemIndex] = useState<number | null>(null);
+  const [vendorSearch, setVendorSearch] = useState('');
+  const [debouncedVendorSearch, setDebouncedVendorSearch] = useState('');
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedVendorSearch(vendorSearch.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [vendorSearch]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['purchases', page, search],
@@ -276,8 +283,12 @@ export default function PurchasesPage() {
   });
 
   const { data: vendorsData } = useQuery({
-    queryKey: ['vendors', 'purchase-form'],
-    queryFn: () => vendorsApi.list({ limit: 100 }),
+    queryKey: ['vendors', 'purchase-form', debouncedVendorSearch],
+    queryFn: () =>
+      vendorsApi.list({
+        limit: 100,
+        search: debouncedVendorSearch || undefined,
+      }),
     enabled: modalOpen,
   });
 
@@ -293,17 +304,32 @@ export default function PurchasesPage() {
   const selectedTenderId = form.watch('tender');
   const selectedTender = tenders.find((t) => t._id === selectedTenderId);
 
-  const vendorOptions = useMemo(
-    () => [
+  const selectedVendorId = form.watch('vendor') ?? '';
+  const selectedVendorNameRaw = form.watch('vendorNameRaw') ?? '';
+
+  const vendorOptions = useMemo(() => {
+    const options = vendors.map((v) => ({
+      value: v._id,
+      label: v.code ? `${v.code} — ${v.name}` : v.name,
+    }));
+
+    // Keep the currently selected vendor visible even if it falls outside the current search page.
+    if (
+      selectedVendorId &&
+      !options.some((option) => option.value === selectedVendorId)
+    ) {
+      options.unshift({
+        value: selectedVendorId,
+        label: selectedVendorNameRaw || selectedVendorId,
+      });
+    }
+
+    return [
       { value: '', label: 'Select vendor' },
-      ...vendors.map((v) => ({
-        value: v._id,
-        label: v.code ? `${v.code} — ${v.name}` : v.name,
-      })),
+      ...options,
       { value: ADD_VENDOR_VALUE, label: '+ Add new vendor' },
-    ],
-    [vendors],
-  );
+    ];
+  }, [vendors, selectedVendorId, selectedVendorNameRaw]);
 
   const tenderOptions = useMemo(
     () => [
@@ -319,15 +345,20 @@ export default function PurchasesPage() {
     [tenders],
   );
 
-  const handleVendorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
+  const handleVendorChange = (value: string) => {
     if (value === ADD_VENDOR_VALUE) {
       setVendorModalOpen(true);
       return;
     }
     const selected = vendors.find((v) => v._id === value);
     form.setValue('vendor', value || undefined, { shouldValidate: true });
-    form.setValue('vendorNameRaw', selected?.name ?? '', { shouldValidate: true });
+    form.setValue(
+      'vendorNameRaw',
+      selected?.name ?? (value ? selectedVendorNameRaw : ''),
+      { shouldValidate: true },
+    );
+    setVendorSearch('');
+    setDebouncedVendorSearch('');
   };
 
   const handleTenderChange = (value: string) => {
@@ -342,13 +373,19 @@ export default function PurchasesPage() {
   };
 
   const handleVendorCreated = (vendor: Vendor) => {
-    queryClient.setQueryData(['vendors', 'purchase-form'], (old: PaginatedResponse<Vendor> | undefined) => {
-      if (!old) return old;
-      return { ...old, data: [...old.data, vendor] };
-    });
+    queryClient.setQueryData(
+      ['vendors', 'purchase-form', debouncedVendorSearch],
+      (old: PaginatedResponse<Vendor> | undefined) => {
+        if (!old) return old;
+        if (old.data.some((v) => v._id === vendor._id)) return old;
+        return { ...old, data: [...old.data, vendor] };
+      },
+    );
     queryClient.invalidateQueries({ queryKey: ['vendors'] });
     form.setValue('vendor', vendor._id, { shouldValidate: true });
     form.setValue('vendorNameRaw', vendor.name, { shouldValidate: true });
+    setVendorSearch('');
+    setDebouncedVendorSearch('');
     setVendorModalOpen(false);
     toast.success('Vendor added');
   };
@@ -502,6 +539,8 @@ export default function PurchasesPage() {
     setSelectedSiteKey('');
     setReceiptFile(null);
     setExistingAttachments([]);
+    setVendorSearch('');
+    setDebouncedVendorSearch('');
     form.reset(defaultFormValues());
   };
 
@@ -798,11 +837,14 @@ export default function PurchasesPage() {
         <div className="space-y-4">
           <FormSection title="Bill & Vendor Details" tone="brand">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Select
+              <SearchableSelect
                 label="Vendor"
                 options={vendorOptions}
-                value={form.watch('vendor') ?? ''}
+                value={selectedVendorId}
                 onChange={handleVendorChange}
+                onSearchChange={setVendorSearch}
+                placeholder="Select vendor"
+                searchPlaceholder="Search vendor name or code..."
                 error={form.formState.errors.vendorNameRaw?.message}
               />
               <input type="hidden" {...form.register('vendorNameRaw')} />
