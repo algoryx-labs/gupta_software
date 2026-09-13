@@ -25,6 +25,9 @@ export const createLabourExpenseSchema = z
 
 export type CreateLabourExpenseInput = z.infer<typeof createLabourExpenseSchema>;
 
+export const updateLabourExpenseSchema = createLabourExpenseSchema;
+export type UpdateLabourExpenseInput = z.infer<typeof updateLabourExpenseSchema>;
+
 export const labourExpenseFilterSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),

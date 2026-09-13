@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   Permission,
   createLabourExpenseSchema,
+  updateLabourExpenseSchema,
   labourExpenseFilterSchema,
 } from '@gupta/shared';
 import { asyncHandler } from '../../utils/asyncHandler.js';
@@ -17,6 +18,7 @@ router.use(authenticate, authorize(Permission.MANAGE_PURCHASES));
 
 router.get('/', validate(labourExpenseFilterSchema, 'query'), asyncHandler(ctrl.list));
 router.post('/', validate(createLabourExpenseSchema), activityLogger('create', 'LabourExpense'), asyncHandler(ctrl.create));
+router.patch('/:id', validate(updateLabourExpenseSchema), activityLogger('update', 'LabourExpense'), asyncHandler(ctrl.update));
 router.delete('/:id', activityLogger('delete', 'LabourExpense'), asyncHandler(ctrl.remove));
 
 export default router;

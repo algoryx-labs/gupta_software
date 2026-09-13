@@ -3,6 +3,7 @@ import {
   LabourExpenseCategory,
   type CreateLabourExpenseInput,
   type LabourExpenseFilterInput,
+  type UpdateLabourExpenseInput,
 } from '@gupta/shared';
 import { LabourExpenseModel, type ILabourExpense } from '../../models/LabourExpense.js';
 import { resolveCreatedByRef } from '../../config/admin.js';
@@ -78,6 +79,31 @@ export async function create(input: CreateLabourExpenseInput, userId: string) {
     .populate('createdBy', 'name')
     .lean()
     .then((row) => (row ? withCategoryDefaults(row) : row));
+}
+
+export async function update(id: string, input: UpdateLabourExpenseInput) {
+  const payload = normalizeCategoryFields(input);
+  const expense = await LabourExpenseModel.findByIdAndUpdate(
+    id,
+    {
+      tender: payload.tender,
+      site: payload.site ?? null,
+      siteNameRaw: payload.siteNameRaw,
+      category: payload.category,
+      categoryOther: payload.categoryOther ?? null,
+      amount: payload.amount,
+      expenseDate: payload.expenseDate,
+      description: payload.description || null,
+    },
+    { new: true, runValidators: true },
+  )
+    .populate('tender', 'tenderName tenderNo')
+    .populate('site', 'name code')
+    .populate('createdBy', 'name')
+    .lean();
+
+  if (!expense) throw new ApiError(404, 'Labour expense not found');
+  return withCategoryDefaults(expense);
 }
 
 export async function remove(id: string) {

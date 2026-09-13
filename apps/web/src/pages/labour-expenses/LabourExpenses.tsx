@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 import {
   createLabourExpenseSchema,
   LabourExpenseCategory,
@@ -50,10 +50,46 @@ function getTenderSiteKey(site: PopulatedTenderSite): string {
   return getSiteRefId(site.site) ?? `name:${site.siteNameRaw}`;
 }
 
+function findSiteKey(
+  sites: PopulatedTenderSite[],
+  siteId?: string,
+  siteNameRaw?: string,
+): string {
+  if (siteId) {
+    const match = sites.find((s) => getSiteRefId(s.site) === siteId);
+    if (match) return getTenderSiteKey(match);
+  }
+  if (siteNameRaw) {
+    const match = sites.find((s) => s.siteNameRaw === siteNameRaw);
+    if (match) return getTenderSiteKey(match);
+    return `name:${siteNameRaw}`;
+  }
+  return '';
+}
+
 function getTenderLabel(tender: ExpenseRow['tender']): string {
   if (!tender || typeof tender === 'string') return '—';
   if (tender.tenderNo && tender.tenderName) return `${tender.tenderNo} — ${tender.tenderName}`;
   return tender.tenderNo ?? tender.tenderName ?? '—';
+}
+
+function expenseToFormValues(expense: ExpenseRow): CreateLabourExpenseInput {
+  const tenderId =
+    typeof expense.tender === 'string'
+      ? expense.tender
+      : expense.tender?._id ?? '';
+  const siteId = getSiteRefId(expense.site);
+
+  return {
+    tender: tenderId,
+    site: siteId,
+    siteNameRaw: expense.siteNameRaw,
+    category: expense.category ?? LabourExpenseCategory.OTHER,
+    categoryOther: expense.categoryOther ?? '',
+    amount: expense.amount,
+    expenseDate: new Date(expense.expenseDate),
+    description: expense.description ?? '',
+  };
 }
 
 const defaultFormValues = (): CreateLabourExpenseInput => ({
@@ -72,6 +108,7 @@ export default function LabourExpensesPage() {
   const [dateTo, setDateTo] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [selectedSiteKey, setSelectedSiteKey] = useState('');
 
@@ -138,6 +175,23 @@ export default function LabourExpensesPage() {
     ];
   }, [selectedTender, selectedTenderId]);
 
+  const syncSiteKeyFromForm = (tenderId?: string, siteId?: string, siteNameRaw?: string) => {
+    if (!tenderId) {
+      setSelectedSiteKey('');
+      return;
+    }
+    const tender = tenders.find((t) => t._id === tenderId);
+    if (!tender) return;
+    setSelectedSiteKey(findSiteKey(tender.sites, siteId, siteNameRaw));
+  };
+
+  useEffect(() => {
+    if (!modalOpen || !tenders.length) return;
+    const tenderId = form.getValues('tender');
+    if (!tenderId) return;
+    syncSiteKeyFromForm(tenderId, form.getValues('site'), form.getValues('siteNameRaw'));
+  }, [modalOpen, tenders, form]);
+
   const createMutation = useMutation({
     mutationFn: labourExpensesApi.create,
     onSuccess: () => {
@@ -147,6 +201,18 @@ export default function LabourExpensesPage() {
       closeModal();
     },
     onError: () => toast.error('Failed to add labour expense'),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: CreateLabourExpenseInput }) =>
+      labourExpensesApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['labour-expenses'] });
+      toast.success('Labour expense updated');
+      closeModal();
+    },
+    onError: () => toast.error('Failed to update labour expense'),
   });
 
   const deleteMutation = useMutation({
@@ -161,6 +227,7 @@ export default function LabourExpensesPage() {
 
   const closeModal = () => {
     setModalOpen(false);
+    setEditId(null);
     form.reset(defaultFormValues());
     setSelectedSiteKey('');
   };
@@ -168,7 +235,16 @@ export default function LabourExpensesPage() {
   const openCreate = () => {
     form.reset(defaultFormValues());
     setSelectedSiteKey('');
+    setEditId(null);
     setModalOpen(true);
+  };
+
+  const openEdit = (expense: ExpenseRow) => {
+    const values = expenseToFormValues(expense);
+    form.reset(values);
+    setEditId(expense._id);
+    setModalOpen(true);
+    syncSiteKeyFromForm(values.tender, values.site, values.siteNameRaw);
   };
 
   const handleSiteChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -186,6 +262,14 @@ export default function LabourExpensesPage() {
 
     form.setValue('site', getSiteRefId(siteEntry.site), { shouldValidate: true });
     form.setValue('siteNameRaw', siteEntry.siteNameRaw, { shouldValidate: true });
+  };
+
+  const onSubmit = (data: CreateLabourExpenseInput) => {
+    if (editId) {
+      updateMutation.mutate({ id: editId, data });
+      return;
+    }
+    createMutation.mutate(data);
   };
 
   const columns: Column<ExpenseRow>[] = [
@@ -223,12 +307,24 @@ export default function LabourExpensesPage() {
       key: 'actions',
       header: '',
       render: (r) => (
-        <button
-          className="rounded p-1 hover:bg-red-50"
-          onClick={() => setDeleteId(r._id)}
-        >
-          <Trash2 className="h-4 w-4 text-red-500" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="rounded p-1 hover:bg-brand-50"
+            onClick={() => openEdit(r)}
+            aria-label="Edit labour expense"
+          >
+            <Pencil className="h-4 w-4 text-gray-500" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-1 hover:bg-red-50"
+            onClick={() => setDeleteId(r._id)}
+            aria-label="Delete labour expense"
+          >
+            <Trash2 className="h-4 w-4 text-red-500" />
+          </button>
+        </div>
       ),
     },
   ];
@@ -308,13 +404,14 @@ export default function LabourExpensesPage() {
       <Modal
         open={modalOpen}
         onClose={closeModal}
-        title="Add Labour Expense"
+        title={editId ? 'Edit Labour Expense' : 'Add Labour Expense'}
         size="lg"
-        onSubmit={form.handleSubmit((d) => createMutation.mutate(d))}
+        onSubmit={form.handleSubmit(onSubmit)}
         footer={
           <ModalFormFooter
             onCancel={closeModal}
-            loading={createMutation.isPending}
+            submitLabel={editId ? 'Update' : 'Create'}
+            loading={createMutation.isPending || updateMutation.isPending}
           />
         }
       >
