@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { ChevronDown, Menu, X } from 'lucide-react';
+import { ChevronDown, CircleHelp, Menu, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Logo } from '@/components/Logo';
 import { DeveloperCredit } from '@/components/DeveloperCredit';
@@ -102,7 +102,17 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
           <NavLinkItem key={item.path} item={item} onNavigate={onMobileClose} />
         ))}
       </nav>
-      <div className="shrink-0 border-t border-border px-3 py-3">
+      <div className="shrink-0 space-y-2 border-t border-border px-3 py-3">
+        <a
+          href="https://algoryx.io/support"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={onMobileClose}
+          className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-brand-50"
+        >
+          <CircleHelp className="h-5 w-5" />
+          Help & Support
+        </a>
         <DeveloperCredit compact />
       </div>
     </div>
