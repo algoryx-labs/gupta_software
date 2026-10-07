@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   ArrowRightLeft,
+  CalendarDays,
   ChevronDown,
   Pencil,
   Plus,
@@ -39,7 +40,7 @@ type ActionMode = 'assign' | 'change' | 'unassign' | null;
 const statusLabels: Record<EmployeeAssignmentStatus, string> = {
   [EmployeeAssignmentStatus.UNASSIGNED]: 'Unassigned',
   [EmployeeAssignmentStatus.ASSIGNED]: 'Assigned',
-  [EmployeeAssignmentStatus.CHANGED]: 'Changed Tender',
+  [EmployeeAssignmentStatus.CHANGED]: 'Moved (legacy)',
 };
 
 const statusVariants: Record<EmployeeAssignmentStatus, string> = {
@@ -59,6 +60,68 @@ function getTenderLabel(
   if (!tender) return '—';
   if (tender.tenderNo && tender.tenderName) return `${tender.tenderNo} — ${tender.tenderName}`;
   return tender.tenderNo ?? tender.tenderName ?? '—';
+}
+
+function preferredDays(employee: EmployeePopulated): number {
+  return Math.max(employee.currentDaysWorked ?? 0, employee.suggestedDaysWorked ?? 0);
+}
+
+function historyEntryExpense(employee: EmployeePopulated, entry: EmployeePopulated['tenderHistory'][number]) {
+  if (typeof entry.expense === 'number') return entry.expense;
+  const salary = typeof entry.monthlySalary === 'number' ? entry.monthlySalary : employee.salary;
+  return (salary / 30) * entry.daysWorked;
+}
+
+function DaysWorkedCell({
+  employee,
+  onSave,
+  saving,
+}: {
+  employee: EmployeePopulated;
+  onSave: (daysWorked: number) => void;
+  saving: boolean;
+}) {
+  const [value, setValue] = useState(String(employee.currentDaysWorked));
+  const dirty = (parseInt(value, 10) || 0) !== employee.currentDaysWorked;
+  const suggested = employee.suggestedDaysWorked;
+
+  return (
+    <div className="flex min-w-[9rem] flex-col gap-1">
+      <div className="flex items-center gap-1">
+        <Input
+          type="number"
+          min={0}
+          className="!w-16 !py-1 !text-sm"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!dirty || saving}
+          loading={saving}
+          onClick={() => onSave(parseInt(value, 10) || 0)}
+          className="!px-2 !py-1 text-xs"
+        >
+          Save
+        </Button>
+      </div>
+      {typeof suggested === 'number' && (
+        <button
+          type="button"
+          className="flex items-center gap-1 text-left text-[11px] text-brand-600 hover:underline"
+          title="Set days from assign date through today"
+          onClick={() => {
+            setValue(String(suggested));
+            if (suggested !== employee.currentDaysWorked) onSave(suggested);
+          }}
+        >
+          <CalendarDays className="h-3 w-3" />
+          Calendar: {suggested}d
+        </button>
+      )}
+    </div>
+  );
 }
 
 const defaultFormValues = (): CreateEmployeeInput => ({
@@ -166,8 +229,8 @@ export default function EmployeeSalaryPage() {
   });
 
   const assignMutation = useMutation({
-    mutationFn: ({ id, tender }: { id: string; tender: string }) =>
-      employeesApi.assign(id, { tender }),
+    mutationFn: ({ id, tender, daysWorked }: { id: string; tender: string; daysWorked?: number }) =>
+      employeesApi.assign(id, { tender, daysWorked }),
     onSuccess: () => {
       invalidate();
       toast.success('Employee assigned to tender');
@@ -253,19 +316,20 @@ export default function EmployeeSalaryPage() {
     setActionEmployee(employee);
     setActionMode('assign');
     setSelectedTenderId('');
+    setDaysInput(0);
   };
 
   const openChangeTender = (employee: EmployeePopulated) => {
     setActionEmployee(employee);
     setActionMode('change');
     setSelectedTenderId('');
-    setDaysInput(employee.currentDaysWorked);
+    setDaysInput(preferredDays(employee));
   };
 
   const openUnassign = (employee: EmployeePopulated) => {
     setActionEmployee(employee);
     setActionMode('unassign');
-    setDaysInput(employee.currentDaysWorked);
+    setDaysInput(preferredDays(employee));
   };
 
   const handleActionConfirm = () => {
@@ -276,7 +340,11 @@ export default function EmployeeSalaryPage() {
         toast.error('Select a tender');
         return;
       }
-      assignMutation.mutate({ id: actionEmployee._id, tender: selectedTenderId });
+      assignMutation.mutate({
+        id: actionEmployee._id,
+        tender: selectedTenderId,
+        daysWorked: daysInput,
+      });
       return;
     }
 
@@ -338,20 +406,12 @@ export default function EmployeeSalaryPage() {
         r.status === EmployeeAssignmentStatus.UNASSIGNED ? (
           '—'
         ) : (
-          <div className="flex items-center gap-1">
-            <Input
-              type="number"
-              min={0}
-              className="!w-16 !py-1 !text-sm"
-              defaultValue={r.currentDaysWorked}
-              onBlur={(e) => {
-                const val = parseInt(e.target.value, 10) || 0;
-                if (val !== r.currentDaysWorked) {
-                  updateDaysMutation.mutate({ id: r._id, daysWorked: val });
-                }
-              }}
-            />
-          </div>
+          <DaysWorkedCell
+            key={`${r._id}-${r.currentDaysWorked}`}
+            employee={r}
+            saving={updateDaysMutation.isPending && updateDaysMutation.variables?.id === r._id}
+            onSave={(daysWorked) => updateDaysMutation.mutate({ id: r._id, daysWorked })}
+          />
         ),
     },
     {
@@ -437,7 +497,12 @@ export default function EmployeeSalaryPage() {
       ? `Enter days worked on ${getTenderLabel(actionEmployee?.currentTender)} before moving to the new tender.`
       : actionMode === 'unassign'
         ? 'Enter days worked on the current tender before unassigning.'
-        : 'Select a tender to assign this employee.';
+        : 'Select a tender and optionally set starting days already worked.';
+
+  const actionCalendarHint =
+    actionMode !== 'assign' && actionEmployee?.suggestedDaysWorked != null
+      ? `Calendar days since assign: ${actionEmployee.suggestedDaysWorked}`
+      : null;
 
   return (
     <PageWrapper
@@ -458,7 +523,7 @@ export default function EmployeeSalaryPage() {
               { value: '', label: 'All statuses' },
               { value: 'unassigned', label: 'Unassigned' },
               { value: 'assigned', label: 'Assigned' },
-              { value: 'changed', label: 'Changed Tender' },
+              { value: 'changed', label: 'Moved (legacy)' },
             ]}
             value={statusFilter}
             onChange={(e) => {
@@ -666,14 +731,37 @@ export default function EmployeeSalaryPage() {
               onChange={(e) => setSelectedTenderId(e.target.value)}
             />
           )}
-          {(actionMode === 'change' || actionMode === 'unassign') && (
-            <Input
-              label="Days worked on current tender"
-              type="number"
-              min={0}
-              value={daysInput}
-              onChange={(e) => setDaysInput(parseInt(e.target.value, 10) || 0)}
-            />
+          {(actionMode === 'assign' || actionMode === 'change' || actionMode === 'unassign') && (
+            <div className="space-y-2">
+              <Input
+                label={
+                  actionMode === 'assign'
+                    ? 'Days already worked (optional)'
+                    : 'Days worked on current tender'
+                }
+                type="number"
+                min={0}
+                value={daysInput}
+                onChange={(e) => setDaysInput(parseInt(e.target.value, 10) || 0)}
+              />
+              {actionMode === 'assign' && (
+                <p className="text-xs text-muted">
+                  Usually leave 0. You can update days later from the table, or use Calendar sync.
+                </p>
+              )}
+              {actionCalendarHint && (
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-xs text-brand-600 hover:underline"
+                  onClick={() =>
+                    setDaysInput(actionEmployee?.suggestedDaysWorked ?? daysInput)
+                  }
+                >
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  Use {actionCalendarHint}
+                </button>
+              )}
+            </div>
           )}
         </div>
       </Modal>
@@ -715,7 +803,7 @@ export default function EmployeeSalaryPage() {
                       <td className="py-2 pr-4">{getTenderLabel(entry.tender)}</td>
                       <td className="py-2 pr-4">{entry.daysWorked}</td>
                       <td className="py-2 pr-4">
-                        {formatCurrency((historyEmployee.salary / 30) * entry.daysWorked)}
+                        {formatCurrency(historyEntryExpense(historyEmployee, entry))}
                       </td>
                       <td className="py-2 pr-4">{formatDate(entry.assignedAt)}</td>
                       <td className="py-2">{formatDate(entry.endedAt)}</td>

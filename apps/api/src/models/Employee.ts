@@ -5,6 +5,10 @@ export interface IEmployeeTenderHistory {
   _id?: Types.ObjectId;
   tender: Types.ObjectId;
   daysWorked: number;
+  /** Salary at assignment end — optional for older prod history rows */
+  monthlySalary?: number;
+  /** Locked expense at assignment end — optional for older prod history rows */
+  expense?: number;
   assignedAt: Date;
   endedAt: Date;
 }
@@ -30,6 +34,8 @@ const tenderHistorySchema = new Schema<IEmployeeTenderHistory>(
   {
     tender: { type: Schema.Types.ObjectId, ref: 'Tender', required: true },
     daysWorked: { type: Number, required: true, min: 0 },
+    monthlySalary: { type: Number, min: 0 },
+    expense: { type: Number, min: 0 },
     assignedAt: { type: Date, required: true },
     endedAt: { type: Date, required: true },
   },
@@ -94,4 +100,26 @@ export function dailyRate(monthlySalary: number): number {
 
 export function calculateExpense(monthlySalary: number, daysWorked: number): number {
   return dailyRate(monthlySalary) * daysWorked;
+}
+
+/** Inclusive calendar days from assign date through asOf (UTC date parts). */
+export function calendarDaysWorked(assignedAt: Date, asOf: Date = new Date()): number {
+  const start = Date.UTC(assignedAt.getFullYear(), assignedAt.getMonth(), assignedAt.getDate());
+  const end = Date.UTC(asOf.getFullYear(), asOf.getMonth(), asOf.getDate());
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 0;
+  return Math.floor((end - start) / 86_400_000) + 1;
+}
+
+export function historyExpense(
+  entry: { daysWorked: number; monthlySalary?: number; expense?: number },
+  fallbackSalary: number,
+): number {
+  if (typeof entry.expense === 'number' && !Number.isNaN(entry.expense)) {
+    return entry.expense;
+  }
+  const salary =
+    typeof entry.monthlySalary === 'number' && !Number.isNaN(entry.monthlySalary)
+      ? entry.monthlySalary
+      : fallbackSalary;
+  return calculateExpense(salary, entry.daysWorked);
 }

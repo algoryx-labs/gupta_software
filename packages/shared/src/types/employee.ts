@@ -4,6 +4,10 @@ export interface EmployeeTenderHistory {
   _id?: string;
   tender: string;
   daysWorked: number;
+  /** Snapshot of monthly salary when the assignment ended (older rows may omit). */
+  monthlySalary?: number;
+  /** Locked expense when the assignment ended (older rows may omit). */
+  expense?: number;
   assignedAt: string | Date;
   endedAt: string | Date;
 }
@@ -34,6 +38,8 @@ export interface EmployeePopulated extends Omit<Employee, 'currentTender' | 'ten
   createdBy?: { _id: string; name: string };
   dailyRate?: number;
   currentTenderExpense?: number;
+  /** Inclusive calendar days from assignedAt through today (computed, not stored). */
+  suggestedDaysWorked?: number;
 }
 
 export interface TenderEmployeeExpense {

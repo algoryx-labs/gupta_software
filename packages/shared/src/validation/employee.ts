@@ -44,6 +44,8 @@ export type EmployeeFilterInput = z.infer<typeof employeeFilterSchema>;
 
 export const assignEmployeeSchema = z.object({
   tender: objectIdSchema,
+  /** Optional initial days; omitted/undefined keeps prod clients working (defaults to 0). */
+  daysWorked: z.coerce.number().int().min(0, 'Days must be 0 or more').optional(),
 });
 
 export type AssignEmployeeInput = z.infer<typeof assignEmployeeSchema>;

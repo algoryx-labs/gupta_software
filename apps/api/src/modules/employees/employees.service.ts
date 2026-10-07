@@ -13,8 +13,10 @@ import {
 import {
   EmployeeModel,
   calculateExpense,
+  calendarDaysWorked,
   dailyRate,
   getNextEmployeeId,
+  historyExpense,
   type IEmployee,
 } from '../../models/Employee.js';
 import { TenderModel } from '../../models/Tender.js';
@@ -57,11 +59,35 @@ function normalizeCategoryFields<T extends { category?: EmployeeCategory; catego
 function enrichEmployee(employee: Record<string, unknown>) {
   const salary = employee.salary as number;
   const currentDays = (employee.currentDaysWorked as number) ?? 0;
+  const assignedAt = employee.assignedAt ? new Date(employee.assignedAt as string | Date) : undefined;
+  const hasActiveAssignment =
+    employee.status !== EmployeeAssignmentStatus.UNASSIGNED && Boolean(employee.currentTender);
+
   return {
     ...employee,
     dailyRate: dailyRate(salary),
     currentTenderExpense: calculateExpense(salary, currentDays),
+    suggestedDaysWorked:
+      hasActiveAssignment && assignedAt && !Number.isNaN(assignedAt.getTime())
+        ? calendarDaysWorked(assignedAt)
+        : undefined,
   };
+}
+
+function pushTenderHistory(
+  employee: IEmployee,
+  daysWorked: number,
+) {
+  if (!employee.currentTender) return;
+  const salary = employee.salary;
+  employee.tenderHistory.push({
+    tender: employee.currentTender,
+    daysWorked,
+    monthlySalary: salary,
+    expense: calculateExpense(salary, daysWorked),
+    assignedAt: employee.assignedAt ?? new Date(),
+    endedAt: new Date(),
+  });
 }
 
 async function assertTenderExists(tenderId: string) {
@@ -146,7 +172,7 @@ export async function assign(id: string, input: AssignEmployeeInput) {
 
   employee.status = EmployeeAssignmentStatus.ASSIGNED;
   employee.currentTender = input.tender as never;
-  employee.currentDaysWorked = 0;
+  employee.currentDaysWorked = input.daysWorked ?? 0;
   employee.assignedAt = new Date();
   await employee.save();
 
@@ -169,14 +195,10 @@ export async function changeTender(id: string, input: ChangeEmployeeTenderInput)
 
   await assertTenderExists(input.tender);
 
-  employee.tenderHistory.push({
-    tender: employee.currentTender,
-    daysWorked: input.daysWorkedOnCurrent,
-    assignedAt: employee.assignedAt ?? new Date(),
-    endedAt: new Date(),
-  });
+  pushTenderHistory(employee, input.daysWorkedOnCurrent);
 
-  employee.status = EmployeeAssignmentStatus.CHANGED;
+  // Stay "assigned" after a move so filters/UX stay consistent (CHANGED kept for legacy rows).
+  employee.status = EmployeeAssignmentStatus.ASSIGNED;
   employee.currentTender = input.tender as never;
   employee.currentDaysWorked = 0;
   employee.assignedAt = new Date();
@@ -196,13 +218,7 @@ export async function unassign(id: string, input: UnassignEmployeeInput) {
   }
 
   const daysWorked = input.daysWorkedOnCurrent ?? employee.currentDaysWorked;
-
-  employee.tenderHistory.push({
-    tender: employee.currentTender,
-    daysWorked,
-    assignedAt: employee.assignedAt ?? new Date(),
-    endedAt: new Date(),
-  });
+  pushTenderHistory(employee, daysWorked);
 
   employee.status = EmployeeAssignmentStatus.UNASSIGNED;
   employee.currentTender = undefined;
@@ -260,7 +276,7 @@ export async function getTenderExpenseSummary(tenderId?: string) {
               salary: emp.salary,
             },
             daysWorked: entry.daysWorked,
-            expense: calculateExpense(emp.salary, entry.daysWorked),
+            expense: historyExpense(entry, emp.salary),
             isCurrent: false,
           });
         }
