@@ -85,11 +85,24 @@ export default function DashboardPage() {
     [tenderPie],
   );
 
+  const selectedTender = useMemo(
+    () => (tendersData?.data ?? []).find((t) => t._id === tenderId),
+    [tendersData, tenderId],
+  );
+
   const selectedTenderStatus = useMemo(() => {
-    const selected = (tendersData?.data ?? []).find((t) => t._id === tenderId);
-    if (!selected?.status) return null;
-    return selected.status.charAt(0).toUpperCase() + selected.status.slice(1);
-  }, [tendersData, tenderId]);
+    if (!selectedTender?.status) return null;
+    return selectedTender.status.charAt(0).toUpperCase() + selectedTender.status.slice(1);
+  }, [selectedTender]);
+
+  const tenderSpendBreakdown = useMemo(() => {
+    if (!data) return [];
+    return [
+      { name: 'Purchases', total: data.purchases.totalGrandValue, fill: '#2563EB' },
+      { name: 'Labour', total: data.labourExpenses.totalAmount, fill: '#22C55E' },
+      { name: 'Salary', total: data.salaryExpenses.totalAmount, fill: '#F59E0B' },
+    ].filter((row) => row.total > 0);
+  }, [data]);
 
   const filters = (
     <Select
@@ -267,16 +280,52 @@ export default function DashboardPage() {
             </div>
 
             <div className="card">
-              <h3 className="mb-4 font-semibold">Top Sites by Spend</h3>
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={data.purchases.bySite} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F0E3DC" />
-                  <XAxis type="number" tick={{ fontSize: 12 }} />
-                  <YAxis dataKey="siteName" type="category" width={100} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                  <Bar dataKey="total" fill="#4F7DF3" radius={[0, 6, 6, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="mb-4">
+                <h3 className="font-semibold">Tender Spend Breakdown</h3>
+                <p className="text-xs text-muted">Purchases, labour & salary for selected tender</p>
+              </div>
+              {tenderSpendBreakdown.length > 0 ? (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={tenderSpendBreakdown}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F0E3DC" />
+                    <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `₹${(v / 100000).toFixed(0)}L`} />
+                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                    <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+                      {tenderSpendBreakdown.map((row) => (
+                        <Cell key={row.name} fill={row.fill} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="py-12 text-center text-sm text-muted">No spend recorded for this tender yet</p>
+              )}
+              {selectedTender && (
+                <div className="mt-4 grid gap-2 border-t border-border pt-4 text-sm sm:grid-cols-2">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted">Order value</span>
+                    <span className="font-medium">{formatCurrency(selectedTender.orderValue)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted">Outstanding</span>
+                    <span className="font-medium">{formatCurrency(selectedTender.paymentOutstanding)}</span>
+                  </div>
+                  {selectedTender.bgExpiryDate && (
+                    <div className="flex justify-between gap-2 sm:col-span-2">
+                      <span className="text-muted">BG expiry</span>
+                      <span className="font-medium">
+                        {new Date(selectedTender.bgExpiryDate).toLocaleDateString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                        {selectedTender.bgNumber ? ` · ${selectedTender.bgNumber}` : ''}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="card">
