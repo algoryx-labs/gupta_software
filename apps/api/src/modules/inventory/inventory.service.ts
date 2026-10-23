@@ -11,6 +11,7 @@ import { PurchaseModel, type IPurchase } from '../../models/Purchase.js';
 import { SiteModel } from '../../models/Site.js';
 import { ItemModel } from '../../models/Item.js';
 import { CategoryModel } from '../../models/Category.js';
+import { TenderModel } from '../../models/Tender.js';
 import { resolveCreatedByRef } from '../../config/admin.js';
 import { ApiError } from '../../utils/ApiError.js';
 import { getPagination, buildPaginationMeta } from '../../utils/pagination.js';
@@ -292,26 +293,60 @@ export async function getOverview() {
 
   const purchaseRefs = await InventoryLedgerModel.find({
     movementType: InventoryMovementType.PURCHASE_IN,
+    purchaseId: { $exists: true },
   })
     .sort({ createdAt: -1 })
-    .select('item itemDescription site billNo category categoryNameRaw')
+    .select('item itemDescription site billNo category categoryNameRaw purchaseId purchaseItemId')
     .lean();
 
-  const purchaseRefMap = new Map<
-    string,
-    { billNo?: string; categoryId?: string; categoryNameRaw?: string; categoryCode?: string }
-  >();
+  const purchaseIds = [
+    ...new Set(
+      purchaseRefs
+        .map((ref) => ref.purchaseId?.toString())
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+
+  const purchaseDocs = purchaseIds.length
+    ? await PurchaseModel.find({ _id: { $in: purchaseIds } })
+        .populate('tender', 'tenderNo tenderName')
+        .select('billNo billName tender items')
+        .lean()
+    : [];
+
+  const purchaseDocMap = new Map(purchaseDocs.map((purchase) => [purchase._id.toString(), purchase]));
+
+  type PurchaseRefMeta = {
+    billNo?: string;
+    billName?: string;
+    categoryId?: string;
+    categoryNameRaw?: string;
+    categoryCode?: string;
+    perRate?: number;
+    tenderNo?: string;
+    tenderName?: string;
+  };
+
+  const purchaseRefMap = new Map<string, PurchaseRefMeta>();
   for (const ref of purchaseRefs) {
     const refKey = `${buildItemKey(ref.item?.toString(), ref.itemDescription)}:${ref.site.toString()}`;
-    if (!purchaseRefMap.has(refKey)) {
-      const categoryId = ref.category?.toString();
-      purchaseRefMap.set(refKey, {
-        billNo: ref.billNo,
-        categoryId,
-        categoryNameRaw: ref.categoryNameRaw,
-        categoryCode: categoryId ? categoryCodeMap.get(categoryId) : undefined,
-      });
-    }
+    if (purchaseRefMap.has(refKey)) continue;
+
+    const purchase = ref.purchaseId ? purchaseDocMap.get(ref.purchaseId.toString()) : undefined;
+    const line = purchase?.items.find((item) => item._id?.toString() === ref.purchaseItemId);
+    const tender = purchase?.tender as { tenderNo?: string; tenderName?: string } | undefined;
+    const categoryId = (line?.category ?? ref.category)?.toString();
+
+    purchaseRefMap.set(refKey, {
+      billNo: purchase?.billNo ?? ref.billNo,
+      billName: purchase?.billName,
+      categoryId,
+      categoryNameRaw: line?.categoryNameRaw ?? ref.categoryNameRaw,
+      categoryCode: categoryId ? categoryCodeMap.get(categoryId) : undefined,
+      perRate: typeof line?.perRate === 'number' ? line.perRate : undefined,
+      tenderNo: tender?.tenderNo,
+      tenderName: tender?.tenderName,
+    });
   }
 
   const categoryLedgerRefs = await InventoryLedgerModel.find({
@@ -360,6 +395,10 @@ export async function getOverview() {
         siteName: site?.name ?? '',
         quantity: cell.quantity,
         billNo: ref?.billNo,
+        billName: ref?.billName,
+        perRate: ref?.perRate,
+        tenderNo: ref?.tenderNo,
+        tenderName: ref?.tenderName,
       };
     })
     .sort((a, b) => a.itemName.localeCompare(b.itemName) || a.siteName.localeCompare(b.siteName));
@@ -377,6 +416,7 @@ export async function getReceipts() {
   const purchases = await PurchaseModel.find({
     siteNameRaw: { $exists: true, $ne: '' },
   })
+    .populate('tender', 'tenderNo tenderName')
     .sort({ billDate: -1 })
     .lean();
 
@@ -395,6 +435,7 @@ export async function getReceipts() {
       if (receivedQty <= 0) continue;
 
       const balanceQty = await getBalanceAtSite(siteId.toString(), itemId, line.itemDescription);
+      const tender = purchase.tender as { tenderNo?: string; tenderName?: string } | undefined;
 
       receipts.push({
         purchaseId: purchase._id.toString(),
@@ -415,6 +456,9 @@ export async function getReceipts() {
         categoryCode: line.category ? categoryCodeMap.get(line.category.toString()) : undefined,
         receivedQty,
         balanceQty: Math.max(0, Math.round(balanceQty * 100) / 100),
+        perRate: typeof line.perRate === 'number' ? line.perRate : undefined,
+        tenderNo: tender?.tenderNo,
+        tenderName: tender?.tenderName,
       });
     }
   }
@@ -505,12 +549,64 @@ export async function listLedger(filters: InventoryLedgerFilterInput) {
   if (movementType) query.movementType = movementType;
   if (search?.trim()) {
     const pattern = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    query.$or = [
+
+    const [matchingTenders, matchingCategories, matchingSites, matchingPurchases] = await Promise.all([
+      TenderModel.find({
+        $or: [{ tenderNo: pattern }, { tenderName: pattern }, { code: pattern }],
+      })
+        .select('_id')
+        .lean(),
+      CategoryModel.find({
+        $or: [{ name: pattern }, { code: pattern }],
+      })
+        .select('_id')
+        .lean(),
+      SiteModel.find({
+        $or: [{ name: pattern }, { code: pattern }],
+      })
+        .select('_id')
+        .lean(),
+      PurchaseModel.find({
+        $or: [{ billNo: pattern }, { billName: pattern }],
+      })
+        .select('_id')
+        .lean(),
+    ]);
+
+    const tenderPurchaseIds =
+      matchingTenders.length > 0
+        ? (
+            await PurchaseModel.find({ tender: { $in: matchingTenders.map((t) => t._id) } })
+              .select('_id')
+              .lean()
+          ).map((purchase) => purchase._id)
+        : [];
+
+    const purchaseIds = [
+      ...new Set([
+        ...matchingPurchases.map((purchase) => purchase._id),
+        ...tenderPurchaseIds,
+      ]),
+    ];
+
+    const orConditions: FilterQuery<IInventoryLedger>[] = [
       { itemDescription: pattern },
       { categoryNameRaw: pattern },
       { billNo: pattern },
       { notes: pattern },
     ];
+
+    if (matchingCategories.length) {
+      orConditions.push({ category: { $in: matchingCategories.map((category) => category._id) } });
+    }
+    if (matchingSites.length) {
+      orConditions.push({ site: { $in: matchingSites.map((site) => site._id) } });
+    }
+    if (purchaseIds.length) {
+      orConditions.push({ purchaseId: { $in: purchaseIds } });
+    }
+
+    query.$or = orConditions;
   }
 
   const [data, total] = await Promise.all([

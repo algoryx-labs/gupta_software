@@ -26,6 +26,10 @@ export interface InventoryStockLine {
   quantity: number;
   billNo?: string;
   billName?: string;
+  /** Unit rate from the purchase line, when available */
+  perRate?: number;
+  tenderNo?: string;
+  tenderName?: string;
 }
 
 export interface InventoryMatrixSite {
@@ -66,6 +70,9 @@ export interface InventoryReceipt {
   categoryCode?: string;
   receivedQty: number;
   balanceQty: number;
+  perRate?: number;
+  tenderNo?: string;
+  tenderName?: string;
 }
 
 export interface InventoryLedgerEntry {

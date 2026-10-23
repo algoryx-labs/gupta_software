@@ -19,7 +19,7 @@ import { Badge } from '@/components/Badge';
 import { Spinner } from '@/components/Spinner';
 import { Pagination } from '@/components/Pagination';
 import { exportToExcel } from '@/lib/exportToExcel';
-import { formatDate } from '@/lib/formatters';
+import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/notify';
 import { InventoryMovementType } from '@gupta/shared';
 
@@ -64,6 +64,9 @@ function filterStockLine(line: InventoryStockLine, filters: InventoryFilterState
       line.categoryNameRaw,
       line.categoryCode,
       line.billNo,
+      line.billName,
+      line.tenderNo,
+      line.tenderName,
       line.siteCode,
       line.siteName,
     ],
@@ -81,6 +84,8 @@ function filterReceipt(receipt: InventoryReceipt, filters: InventoryFilterState)
       receipt.categoryCode,
       receipt.billNo,
       receipt.billName,
+      receipt.tenderNo,
+      receipt.tenderName,
       receipt.siteCode,
       receipt.siteName,
       String(receipt.purchaseSerialNo),
@@ -674,6 +679,8 @@ export default function InventoryPage() {
                     Site: `${line.siteCode} — ${line.siteName}`,
                     Quantity: line.quantity,
                     'Bill No': line.billNo ?? '',
+                    Tender: line.tenderNo ?? '',
+                    'Purchase Rate': line.perRate ?? '',
                   })),
                   'inventory-stock',
                 )
@@ -961,7 +968,7 @@ function InventoryFilterBar({
         <div className="min-w-0 flex-1">
           <Input
             label="Search"
-            placeholder="Item, bill no., category, site..."
+            placeholder="Item, bill no., category, tender, site..."
             value={filters.search}
             onChange={(e) => onChange({ search: e.target.value })}
           />
@@ -1070,12 +1077,14 @@ function StockListTab({
       <div className="overflow-x-auto">
         <table className="w-full table-fixed text-sm">
           <colgroup>
-            <col className="w-[28%]" />
-            <col className="w-[16%]" />
-            <col className="w-[18%]" />
-            <col className="w-[12%]" />
-            <col className="w-[12%]" />
+            <col className="w-[24%]" />
             <col className="w-[14%]" />
+            <col className="w-[16%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
+            <col className="w-[6%]" />
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-brand-50/50">
@@ -1083,6 +1092,7 @@ function StockListTab({
               <th className="px-4 py-3 text-left font-medium text-gray-700">Category</th>
               <th className="px-4 py-3 text-left font-medium text-gray-700">Site</th>
               <th className="px-4 py-3 text-left font-medium text-gray-700">Bill No</th>
+              <th className="px-4 py-3 text-right font-medium text-gray-700">Purchase Rate</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700">Available</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700">Actions</th>
             </tr>
@@ -1106,7 +1116,15 @@ function StockListTab({
                   <div className="font-medium text-gray-900">{line.siteCode}</div>
                   <div className="text-xs text-muted">{line.siteName}</div>
                 </td>
-                <td className="px-4 py-3 align-top text-gray-600">{line.billNo ?? '—'}</td>
+                <td className="px-4 py-3 align-top text-gray-600">
+                  <div>{line.billNo ?? '—'}</div>
+                  {line.tenderNo && (
+                    <div className="mt-0.5 text-xs text-muted">{line.tenderNo}</div>
+                  )}
+                </td>
+                <td className="px-4 py-3 align-top text-right text-gray-700">
+                  {typeof line.perRate === 'number' ? formatCurrency(line.perRate) : '—'}
+                </td>
                 <td className="px-4 py-3 align-top text-right font-semibold text-gray-900">
                   {line.quantity}
                   {line.unit ? <span className="ml-1 text-xs font-normal text-muted">{line.unit}</span> : null}
@@ -1118,7 +1136,7 @@ function StockListTab({
             ))}
             {stockLines.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-12 text-center text-muted">
+                <td colSpan={7} className="py-12 text-center text-muted">
                   <Package className="mx-auto mb-2 h-8 w-8 opacity-40" />
                   {emptyMessage ??
                     'No stock yet. Add purchases with a site and item quantity — stock syncs automatically on refresh.'}
@@ -1172,6 +1190,7 @@ function ReceiptsTab({
               <th className="px-4 py-3 text-left font-medium text-gray-700">Item</th>
               <th className="px-4 py-3 text-left font-medium text-gray-700">Category</th>
               <th className="px-4 py-3 text-left font-medium text-gray-700">Site</th>
+              <th className="px-4 py-3 text-right font-medium text-gray-700">Rate</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700">Received</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700">Balance</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700">Actions</th>
@@ -1185,6 +1204,9 @@ function ReceiptsTab({
                   <div className="mt-0.5 text-xs text-muted">
                     {receipt.billNo} · {formatDate(receipt.billDate)}
                   </div>
+                  {receipt.tenderNo && (
+                    <div className="mt-0.5 text-xs text-muted">{receipt.tenderNo}</div>
+                  )}
                 </td>
                 <td className="px-4 py-3 align-top">
                   <div className="font-medium text-gray-900">{receipt.itemDescription}</div>
@@ -1196,6 +1218,9 @@ function ReceiptsTab({
                 <td className="px-4 py-3 align-top">
                   <div className="font-medium text-gray-900">{receipt.siteCode}</div>
                   <div className="text-xs text-muted">{receipt.siteName}</div>
+                </td>
+                <td className="px-4 py-3 align-top text-right text-gray-700">
+                  {typeof receipt.perRate === 'number' ? formatCurrency(receipt.perRate) : '—'}
                 </td>
                 <td className="px-4 py-3 align-top text-right text-gray-700">
                   {receipt.receivedQty}
@@ -1216,7 +1241,7 @@ function ReceiptsTab({
             ))}
             {receipts.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-muted">
+                <td colSpan={8} className="py-12 text-center text-muted">
                   {emptyMessage ?? 'No purchase receipts found. Add purchases with items and a linked site.'}
                 </td>
               </tr>
