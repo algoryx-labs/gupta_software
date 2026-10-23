@@ -15,6 +15,10 @@ interface SearchableSelectProps {
   onChange: (value: string) => void;
   /** When set, search is driven by the parent (e.g. server-side); local filtering is skipped. */
   onSearchChange?: (query: string) => void;
+  /** Load the next page when the user scrolls near the bottom of the list. */
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
   placeholder?: string;
   searchPlaceholder?: string;
   disabled?: boolean;
@@ -32,6 +36,9 @@ export function SearchableSelect({
   value,
   onChange,
   onSearchChange,
+  onLoadMore,
+  hasMore = false,
+  isLoadingMore = false,
   placeholder = 'Select...',
   searchPlaceholder = 'Search...',
   disabled = false,
@@ -42,12 +49,25 @@ export function SearchableSelect({
   const [query, setQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   const onSearchChangeRef = useRef(onSearchChange);
+  const onLoadMoreRef = useRef(onLoadMore);
   const inputId = useId();
   const serverDriven = Boolean(onSearchChange);
 
   useEffect(() => {
     onSearchChangeRef.current = onSearchChange;
   }, [onSearchChange]);
+
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore;
+  }, [onLoadMore]);
+
+  const handleListScroll = (event: React.UIEvent<HTMLUListElement>) => {
+    if (!hasMore || isLoadingMore) return;
+    const el = event.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 48) {
+      onLoadMoreRef.current?.();
+    }
+  };
 
   const selectedOption = useMemo(
     () => options.find((option) => option.value === value),
@@ -182,7 +202,11 @@ export function SearchableSelect({
               </div>
             </div>
 
-            <ul className="max-h-56 overflow-y-auto py-1" role="listbox">
+            <ul
+              className="max-h-56 overflow-y-auto py-1"
+              role="listbox"
+              onScroll={handleListScroll}
+            >
               {filteredOptions.length === actionOptions.length && query.trim() ? (
                 <li className="px-3 py-2 text-sm text-gray-500">{emptyMessage}</li>
               ) : (
@@ -203,6 +227,12 @@ export function SearchableSelect({
                     </button>
                   </li>
                 ))
+              )}
+              {isLoadingMore && (
+                <li className="px-3 py-2 text-center text-xs text-gray-500">Loading more...</li>
+              )}
+              {hasMore && !isLoadingMore && filteredOptions.length > actionOptions.length && (
+                <li className="px-3 py-1 text-center text-xs text-gray-400">Scroll for more</li>
               )}
             </ul>
           </div>

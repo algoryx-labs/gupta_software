@@ -39,6 +39,7 @@ import { QuickAddTenderModal } from '@/components/quick-add/QuickAddTenderModal'
 import { QuickAddCategoryModal } from '@/components/quick-add/QuickAddCategoryModal';
 import { toast } from '@/lib/notify';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '@/lib/uploadLimits';
+import { usePaginatedMasterSelect } from '@/hooks/usePaginatedMasterSelect';
 
 const ADD_VENDOR_VALUE = '__add_vendor__';
 const ADD_TENDER_VALUE = '__add_tender__';
@@ -240,14 +241,6 @@ export default function PurchasesPage() {
   const [tenderModalOpen, setTenderModalOpen] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [categoryModalItemIndex, setCategoryModalItemIndex] = useState<number | null>(null);
-  const [vendorSearch, setVendorSearch] = useState('');
-  const [debouncedVendorSearch, setDebouncedVendorSearch] = useState('');
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedVendorSearch(vendorSearch.trim()), 300);
-    return () => window.clearTimeout(timer);
-  }, [vendorSearch]);
-
   const { data, isLoading } = useQuery({
     queryKey: ['purchases', page, search],
     queryFn: () =>
@@ -276,33 +269,49 @@ export default function PurchasesPage() {
     name: 'items',
   });
 
-  const { data: tendersData } = useQuery({
+  const vendorsSelect = usePaginatedMasterSelect<Vendor>({
+    queryKey: ['vendors', 'purchase-form'],
+    fetchPage: (params) => vendorsApi.list(params),
+    enabled: modalOpen,
+  });
+
+  const tendersSelect = usePaginatedMasterSelect<TenderOption>({
     queryKey: ['tenders', 'purchase-form'],
-    queryFn: () => tendersApi.list({ limit: 100, sortBy: 'tenderName', sortOrder: 'asc' }),
+    fetchPage: (params) =>
+      tendersApi.list({
+        ...params,
+        sortBy: 'tenderName',
+        sortOrder: 'asc',
+      }) as Promise<PaginatedResponse<TenderOption>>,
     enabled: modalOpen,
   });
 
-  const { data: vendorsData } = useQuery({
-    queryKey: ['vendors', 'purchase-form', debouncedVendorSearch],
-    queryFn: () =>
-      vendorsApi.list({
-        limit: 100,
-        search: debouncedVendorSearch || undefined,
-      }),
-    enabled: modalOpen,
-  });
-
-  const { data: categoriesData } = useQuery({
+  const categoriesSelect = usePaginatedMasterSelect<Category>({
     queryKey: ['categories', 'purchase-form'],
-    queryFn: () => categoriesApi.list({ limit: 100 }),
+    fetchPage: (params) => categoriesApi.list(params),
     enabled: modalOpen,
   });
 
-  const tenders = (tendersData?.data ?? []) as TenderOption[];
-  const vendors = vendorsData?.data ?? [];
-  const categories = categoriesData?.data ?? [];
+  const tenders = tendersSelect.items;
+  const vendors = vendorsSelect.items;
+  const categories = categoriesSelect.items;
   const selectedTenderId = form.watch('tender');
-  const selectedTender = tenders.find((t) => t._id === selectedTenderId);
+
+  const { data: fetchedTender } = useQuery({
+    queryKey: ['tenders', 'purchase-form-detail', selectedTenderId],
+    queryFn: () => tendersApi.get(selectedTenderId!),
+    enabled:
+      modalOpen &&
+      !!selectedTenderId &&
+      !tenders.some((t) => t._id === selectedTenderId),
+  });
+
+  const selectedTender = useMemo(() => {
+    const fromList = tenders.find((t) => t._id === selectedTenderId);
+    if (fromList) return fromList;
+    if (fetchedTender) return fetchedTender as TenderOption;
+    return undefined;
+  }, [tenders, selectedTenderId, fetchedTender]);
 
   const selectedVendorId = form.watch('vendor') ?? '';
   const selectedVendorNameRaw = form.watch('vendorNameRaw') ?? '';
@@ -331,19 +340,33 @@ export default function PurchasesPage() {
     ];
   }, [vendors, selectedVendorId, selectedVendorNameRaw]);
 
-  const tenderOptions = useMemo(
-    () => [
+  const tenderOptions = useMemo(() => {
+    const options = tenders.map((t) => ({
+      value: t._id,
+      label: t.code
+        ? `${t.code} — ${t.tenderNo} — ${t.tenderName}`
+        : `${t.tenderNo} — ${t.tenderName}`,
+    }));
+
+    if (
+      selectedTenderId &&
+      !options.some((option) => option.value === selectedTenderId) &&
+      selectedTender
+    ) {
+      options.unshift({
+        value: selectedTenderId,
+        label: selectedTender.code
+          ? `${selectedTender.code} — ${selectedTender.tenderNo} — ${selectedTender.tenderName}`
+          : `${selectedTender.tenderNo} — ${selectedTender.tenderName}`,
+      });
+    }
+
+    return [
       { value: '', label: 'Select tender' },
-      ...tenders.map((t) => ({
-        value: t._id,
-        label: t.code
-          ? `${t.code} — ${t.tenderNo} — ${t.tenderName}`
-          : `${t.tenderNo} — ${t.tenderName}`,
-      })),
+      ...options,
       { value: ADD_TENDER_VALUE, label: '+ Add new tender' },
-    ],
-    [tenders],
-  );
+    ];
+  }, [tenders, selectedTenderId, selectedTender]);
 
   const handleVendorChange = (value: string) => {
     if (value === ADD_VENDOR_VALUE) {
@@ -357,8 +380,7 @@ export default function PurchasesPage() {
       selected?.name ?? (value ? selectedVendorNameRaw : ''),
       { shouldValidate: true },
     );
-    setVendorSearch('');
-    setDebouncedVendorSearch('');
+    vendorsSelect.resetSearch();
   };
 
   const handleTenderChange = (value: string) => {
@@ -373,28 +395,17 @@ export default function PurchasesPage() {
   };
 
   const handleVendorCreated = (vendor: Vendor) => {
-    queryClient.setQueryData(
-      ['vendors', 'purchase-form', debouncedVendorSearch],
-      (old: PaginatedResponse<Vendor> | undefined) => {
-        if (!old) return old;
-        if (old.data.some((v) => v._id === vendor._id)) return old;
-        return { ...old, data: [...old.data, vendor] };
-      },
-    );
+    queryClient.invalidateQueries({ queryKey: ['vendors', 'purchase-form'] });
     queryClient.invalidateQueries({ queryKey: ['vendors'] });
     form.setValue('vendor', vendor._id, { shouldValidate: true });
     form.setValue('vendorNameRaw', vendor.name, { shouldValidate: true });
-    setVendorSearch('');
-    setDebouncedVendorSearch('');
+    vendorsSelect.resetSearch();
     setVendorModalOpen(false);
     toast.success('Vendor added');
   };
 
   const handleTenderCreated = (tender: Tender) => {
-    queryClient.setQueryData(['tenders', 'purchase-form'], (old: PaginatedResponse<TenderOption> | undefined) => {
-      if (!old) return old;
-      return { ...old, data: [...old.data, tender as TenderOption] };
-    });
+    queryClient.invalidateQueries({ queryKey: ['tenders', 'purchase-form'] });
     queryClient.invalidateQueries({ queryKey: ['tenders'] });
     form.setValue('tender', tender._id, { shouldValidate: true });
     form.setValue('site', undefined);
@@ -404,17 +415,35 @@ export default function PurchasesPage() {
     toast.success('Tender added');
   };
 
-  const categoryOptions = useMemo(
-    () => [
+  const watchedItems = form.watch('items');
+
+  const categoryOptions = useMemo(() => {
+    const options = categories.map((c) => ({
+      value: c._id,
+      label: c.code ? `${c.code} — ${c.name}` : c.name,
+    }));
+
+    const seen = new Set(options.map((option) => option.value));
+    for (const item of watchedItems ?? []) {
+      if (!item.category || seen.has(item.category)) continue;
+      const fromList = categories.find((c) => c._id === item.category);
+      options.unshift({
+        value: item.category,
+        label: fromList
+          ? fromList.code
+            ? `${fromList.code} — ${fromList.name}`
+            : fromList.name
+          : item.categoryNameRaw || item.category,
+      });
+      seen.add(item.category);
+    }
+
+    return [
       { value: '', label: 'Select category' },
-      ...categories.map((c) => ({
-        value: c._id,
-        label: c.code ? `${c.code} — ${c.name}` : c.name,
-      })),
+      ...options,
       { value: ADD_CATEGORY_VALUE, label: '+ Add new category' },
-    ],
-    [categories],
-  );
+    ];
+  }, [categories, watchedItems]);
 
   const handleCategoryChange = (index: number, value: string) => {
     if (value === ADD_CATEGORY_VALUE) {
@@ -428,10 +457,7 @@ export default function PurchasesPage() {
   };
 
   const handleCategoryCreated = (category: Category) => {
-    queryClient.setQueryData(['categories', 'purchase-form'], (old: PaginatedResponse<Category> | undefined) => {
-      if (!old) return old;
-      return { ...old, data: [...old.data, category] };
-    });
+    queryClient.invalidateQueries({ queryKey: ['categories', 'purchase-form'] });
     queryClient.invalidateQueries({ queryKey: ['categories'] });
     if (categoryModalItemIndex !== null) {
       form.setValue(`items.${categoryModalItemIndex}.category`, category._id, { shouldValidate: true });
@@ -478,12 +504,13 @@ export default function PurchasesPage() {
       setSelectedSiteKey('');
       return;
     }
-    const tender = tenders.find((t) => t._id === tenderId);
+    const tender =
+      tenders.find((t) => t._id === tenderId) ??
+      (selectedTenderId === tenderId ? selectedTender : undefined);
     if (!tender) return;
     setSelectedSiteKey(findSiteKey(tender.sites, siteId, siteNameRaw));
   };
 
-  const watchedItems = form.watch('items');
   const itemTotals = (watchedItems ?? []).map((item) => computePurchaseTotals(item));
   const totals = computePurchaseAggregateTotals(itemTotals);
 
@@ -492,7 +519,7 @@ export default function PurchasesPage() {
     const tenderId = form.getValues('tender');
     if (!tenderId) return;
     syncSiteKeyFromForm(tenderId, form.getValues('site'), form.getValues('siteNameRaw'));
-  }, [modalOpen, tenders, form]);
+  }, [modalOpen, tenders, selectedTender, selectedTenderId, form]);
 
   useEffect(() => {
     if (!modalOpen || !vendors.length) return;
@@ -539,8 +566,9 @@ export default function PurchasesPage() {
     setSelectedSiteKey('');
     setReceiptFile(null);
     setExistingAttachments([]);
-    setVendorSearch('');
-    setDebouncedVendorSearch('');
+    vendorsSelect.resetSearch();
+    tendersSelect.resetSearch();
+    categoriesSelect.resetSearch();
     form.reset(defaultFormValues());
   };
 
@@ -842,7 +870,10 @@ export default function PurchasesPage() {
                 options={vendorOptions}
                 value={selectedVendorId}
                 onChange={handleVendorChange}
-                onSearchChange={setVendorSearch}
+                onSearchChange={vendorsSelect.setSearch}
+                onLoadMore={() => vendorsSelect.fetchNextPage()}
+                hasMore={vendorsSelect.hasMore}
+                isLoadingMore={vendorsSelect.isLoadingMore}
                 placeholder="Select vendor"
                 searchPlaceholder="Search vendor name or code..."
                 error={form.formState.errors.vendorNameRaw?.message}
@@ -869,6 +900,10 @@ export default function PurchasesPage() {
                 options={tenderOptions}
                 value={form.watch('tender') ?? ''}
                 onChange={handleTenderChange}
+                onSearchChange={tendersSelect.setSearch}
+                onLoadMore={() => tendersSelect.fetchNextPage()}
+                hasMore={tendersSelect.hasMore}
+                isLoadingMore={tendersSelect.isLoadingMore}
                 placeholder="Select tender"
                 searchPlaceholder="Search tender no, name, code..."
                 error={form.formState.errors.tender?.message}
@@ -921,6 +956,10 @@ export default function PurchasesPage() {
                       options={categoryOptions}
                       value={form.watch(`items.${index}.category`) ?? ''}
                       onChange={(value) => handleCategoryChange(index, value)}
+                      onSearchChange={categoriesSelect.setSearch}
+                      onLoadMore={() => categoriesSelect.fetchNextPage()}
+                      hasMore={categoriesSelect.hasMore}
+                      isLoadingMore={categoriesSelect.isLoadingMore}
                       placeholder="Select category"
                       searchPlaceholder="Search category name or code..."
                       error={form.formState.errors.items?.[index]?.categoryNameRaw?.message}
