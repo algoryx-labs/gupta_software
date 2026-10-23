@@ -999,8 +999,15 @@ export default function PurchasesPage() {
                       <input type="checkbox" {...form.register(`items.${index}.isHmPurchase`)} />
                       HM Purchase
                     </label>
-                    <div className="sm:col-span-2 text-sm text-gray-500">
-                      Line total: {formatCurrency(lineTotal.grandTotal)}
+                    <div className="sm:col-span-2 space-y-1 rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                      <div className="flex justify-between text-gray-600">
+                        <span>Without GST</span>
+                        <span>{formatCurrency(lineTotal.subTotal)}</span>
+                      </div>
+                      <div className="flex justify-between font-medium text-gray-900">
+                        <span>With GST</span>
+                        <span>{formatCurrency(lineTotal.grandTotal)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
