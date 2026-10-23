@@ -100,24 +100,38 @@ function buildPurchaseSort(sortBy = 'serialNo', sortOrder?: 'asc' | 'desc') {
   const sort: Record<string, 1 | -1> = { [key]: direction };
   // Keep newest uploads on top when the primary key ties (or is not serialNo).
   if (key !== 'serialNo') sort.serialNo = -1;
-  return sort;
+  return { sort, numericBillNo: key === 'billNo' };
+}
+
+function applyPurchaseQuerySort<T extends ReturnType<typeof PurchaseModel.find>>(
+  query: T,
+  sortBy?: string,
+  sortOrder?: 'asc' | 'desc',
+) {
+  const { sort, numericBillNo } = buildPurchaseSort(sortBy, sortOrder);
+  let sorted = query.sort(sort);
+  if (numericBillNo) {
+    sorted = sorted.collation({ locale: 'en', numericOrdering: true });
+  }
+  return sorted;
 }
 
 export async function list(filters: PurchaseFilterInput) {
   const { page, limit, sortBy = 'serialNo', sortOrder } = filters;
   const { skip } = getPagination(page, limit);
   const filter = buildFilter(filters);
-  const sort = buildPurchaseSort(sortBy, sortOrder);
-
   const [data, total] = await Promise.all([
-    PurchaseModel.find(filter)
-      .populate('vendor', 'name code gstin')
-      .populate('tender', 'tenderName tenderNo code')
-      .populate('site', 'name code')
-      .populate('items.item', 'name')
-      .populate('items.category', 'name code')
-      .populate('createdBy', 'name')
-      .sort(sort)
+    applyPurchaseQuerySort(
+      PurchaseModel.find(filter)
+        .populate('vendor', 'name code gstin')
+        .populate('tender', 'tenderName tenderNo code')
+        .populate('site', 'name code')
+        .populate('items.item', 'name')
+        .populate('items.category', 'name code')
+        .populate('createdBy', 'name'),
+      sortBy,
+      sortOrder,
+    )
       .skip(skip)
       .limit(limit)
       .lean(),
@@ -129,12 +143,14 @@ export async function list(filters: PurchaseFilterInput) {
 
 export async function listForExport(filters: PurchaseFilterInput) {
   const filter = buildFilter(filters);
-  const data = await PurchaseModel.find(filter)
-    .populate('vendor', 'name code')
-    .populate('tender', 'tenderName tenderNo code')
-    .populate('site', 'name code')
-    .sort(buildPurchaseSort(filters.sortBy, filters.sortOrder))
-    .lean();
+  const data = await applyPurchaseQuerySort(
+    PurchaseModel.find(filter)
+      .populate('vendor', 'name code')
+      .populate('tender', 'tenderName tenderNo code')
+      .populate('site', 'name code'),
+    filters.sortBy,
+    filters.sortOrder,
+  ).lean();
   return normalizePurchases(data as unknown as LegacyPurchase[]);
 }
 

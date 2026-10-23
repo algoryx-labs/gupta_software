@@ -244,10 +244,36 @@ export default function PurchasesPage() {
   const [billNoSort, setBillNoSort] = useState<'asc' | 'desc'>('desc');
   const [activeSort, setActiveSort] = useState<'billDate' | 'billNo'>('billDate');
 
-  const listSort = {
-    sortBy: activeSort,
-    sortOrder: activeSort === 'billDate' ? (dateSort === 'recent' ? 'desc' : 'asc') : billNoSort,
-  };
+  const listParams = useMemo(
+    () => ({
+      page,
+      limit: 20,
+      search: search || undefined,
+      sortBy: activeSort,
+      sortOrder: (activeSort === 'billDate'
+        ? dateSort === 'recent'
+          ? 'desc'
+          : 'asc'
+        : billNoSort) as 'asc' | 'desc',
+    }),
+    [page, search, activeSort, dateSort, billNoSort],
+  );
+
+  const exportParams = useMemo(
+    () => ({
+      search: listParams.search,
+      sortBy: listParams.sortBy,
+      sortOrder: listParams.sortOrder,
+    }),
+    [listParams.search, listParams.sortBy, listParams.sortOrder],
+  );
+
+  const sortSummary = useMemo(() => {
+    if (activeSort === 'billDate') {
+      return dateSort === 'recent' ? 'bill date · newest first' : 'bill date · oldest first';
+    }
+    return billNoSort === 'asc' ? 'bill no · ascending' : 'bill no · descending';
+  }, [activeSort, dateSort, billNoSort]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -260,14 +286,8 @@ export default function PurchasesPage() {
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [categoryModalItemIndex, setCategoryModalItemIndex] = useState<number | null>(null);
   const { data, isLoading } = useQuery({
-    queryKey: ['purchases', page, search, activeSort, dateSort, billNoSort],
-    queryFn: () =>
-      purchasesApi.list({
-        page,
-        limit: 20,
-        search: search || undefined,
-        ...listSort,
-      }),
+    queryKey: ['purchases', listParams],
+    queryFn: () => purchasesApi.list(listParams),
   });
 
   const { data: detailPurchase, isLoading: detailLoading } = useQuery({
@@ -672,10 +692,7 @@ export default function PurchasesPage() {
   };
 
   const handleExportExcel = async () => {
-    const { data: rows } = await purchasesApi.export({
-      search: search || undefined,
-      ...listSort,
-    });
+    const { data: rows } = await purchasesApi.export(exportParams);
     exportToExcel(
       rows.flatMap((r) =>
         r.items.map((item) => ({
@@ -699,10 +716,7 @@ export default function PurchasesPage() {
 
   const handleExportPdf = async () => {
     try {
-      const { data: rows } = await purchasesApi.export({
-        search: search || undefined,
-        ...listSort,
-      });
+      const { data: rows } = await purchasesApi.export(exportParams);
       await exportToPdf(
         'Purchase Report',
         [
@@ -873,6 +887,12 @@ export default function PurchasesPage() {
           className="!w-40"
         />
       </div>
+
+      {data?.meta?.total !== undefined && (
+        <p className="mb-3 text-sm text-muted">
+          {data.meta.total} bills · sorted by {sortSummary} across all records (20 per page)
+        </p>
+      )}
 
       <DataTable
         columns={columns}
