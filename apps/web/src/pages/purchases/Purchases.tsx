@@ -45,6 +45,16 @@ const ADD_VENDOR_VALUE = '__add_vendor__';
 const ADD_TENDER_VALUE = '__add_tender__';
 const ADD_CATEGORY_VALUE = '__add_category__';
 
+const billDateSortOptions = [
+  { value: 'recent', label: 'Recent first' },
+  { value: 'oldest', label: 'Oldest first' },
+];
+
+const billNoSortOptions = [
+  { value: 'asc', label: 'Ascending' },
+  { value: 'desc', label: 'Descending' },
+];
+
 type PurchaseRow = Purchase & {
   vendor?: { name: string };
   tender?: { tenderName: string; tenderNo: string };
@@ -230,6 +240,14 @@ export default function PurchasesPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [dateSort, setDateSort] = useState<'recent' | 'oldest'>('recent');
+  const [billNoSort, setBillNoSort] = useState<'asc' | 'desc'>('desc');
+  const [activeSort, setActiveSort] = useState<'billDate' | 'billNo'>('billDate');
+
+  const listSort = {
+    sortBy: activeSort,
+    sortOrder: activeSort === 'billDate' ? (dateSort === 'recent' ? 'desc' : 'asc') : billNoSort,
+  };
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -242,14 +260,13 @@ export default function PurchasesPage() {
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [categoryModalItemIndex, setCategoryModalItemIndex] = useState<number | null>(null);
   const { data, isLoading } = useQuery({
-    queryKey: ['purchases', page, search],
+    queryKey: ['purchases', page, search, activeSort, dateSort, billNoSort],
     queryFn: () =>
       purchasesApi.list({
         page,
         limit: 20,
         search: search || undefined,
-        sortBy: 'serialNo',
-        sortOrder: 'desc',
+        ...listSort,
       }),
   });
 
@@ -657,8 +674,7 @@ export default function PurchasesPage() {
   const handleExportExcel = async () => {
     const { data: rows } = await purchasesApi.export({
       search: search || undefined,
-      sortBy: 'serialNo',
-      sortOrder: 'desc',
+      ...listSort,
     });
     exportToExcel(
       rows.flatMap((r) =>
@@ -685,8 +701,7 @@ export default function PurchasesPage() {
     try {
       const { data: rows } = await purchasesApi.export({
         search: search || undefined,
-        sortBy: 'serialNo',
-        sortOrder: 'desc',
+        ...listSort,
       });
       await exportToPdf(
         'Purchase Report',
@@ -750,7 +765,7 @@ export default function PurchasesPage() {
 
   const columns: Column<PurchaseRow>[] = [
     { key: 'serialNo', header: '#', className: 'w-12' },
-    { key: 'billNo', header: 'Bill No', sortable: true },
+    { key: 'billNo', header: 'Bill No' },
     { key: 'billName', header: 'Bill Name' },
     { key: 'billDate', header: 'Date', render: (r) => formatDate(r.billDate) },
     { key: 'vendorNameRaw', header: 'Vendor' },
@@ -825,7 +840,7 @@ export default function PurchasesPage() {
         </div>
       }
     >
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-end gap-2">
         <Input
           placeholder="Search bill no, bill name, item, vendor, site..."
           value={search}
@@ -834,6 +849,28 @@ export default function PurchasesPage() {
             setPage(1);
           }}
           className="max-w-md"
+        />
+        <Select
+          label="Bill Date"
+          options={billDateSortOptions}
+          value={dateSort}
+          onChange={(e) => {
+            setDateSort(e.target.value as 'recent' | 'oldest');
+            setActiveSort('billDate');
+            setPage(1);
+          }}
+          className="!w-40"
+        />
+        <Select
+          label="Bill No"
+          options={billNoSortOptions}
+          value={billNoSort}
+          onChange={(e) => {
+            setBillNoSort(e.target.value as 'asc' | 'desc');
+            setActiveSort('billNo');
+            setPage(1);
+          }}
+          className="!w-40"
         />
       </div>
 
