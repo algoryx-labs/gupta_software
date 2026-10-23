@@ -21,7 +21,7 @@ const vendorDetailFields = [
 const columns: Column<Vendor>[] = [
   { key: 'code', header: 'Code', className: 'w-28' },
   { key: 'name', header: 'Vendor Name' },
-  { key: 'contactPerson', header: 'Contact Person Name' },
+  { key: 'gstin', header: 'GST', render: (r) => r.gstin?.trim() || '—' },
   { key: 'phone', header: 'Mobile' },
 ];
 
