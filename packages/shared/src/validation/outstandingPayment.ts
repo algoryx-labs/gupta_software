@@ -3,7 +3,7 @@ import { objectIdSchema } from './common.js';
 
 export const createOutstandingPaymentSchema = z.object({
   tender: z.string().min(1, 'Tender is required').regex(/^[a-f\d]{24}$/i, 'Invalid tender'),
-  site: objectIdSchema.optional(),
+  site: objectIdSchema.nullish().transform((value) => value ?? undefined),
   siteNameRaw: z.string().min(1, 'Site is required'),
   amount: z.coerce.number().min(0.01, 'Amount must be greater than 0'),
   paymentDate: z.coerce.date(),

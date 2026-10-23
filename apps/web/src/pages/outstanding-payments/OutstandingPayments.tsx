@@ -47,6 +47,26 @@ function getTenderLabel(tender: PaymentRow['tender']): string {
   return tender.tenderNo ?? tender.tenderName ?? '—';
 }
 
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function prepareCreatePayload(
+  data: CreateOutstandingPaymentInput,
+): CreateOutstandingPaymentInput {
+  return {
+    tender: data.tender,
+    siteNameRaw: data.siteNameRaw,
+    amount: data.amount,
+    paymentDate: data.paymentDate,
+    ...(data.site ? { site: data.site } : {}),
+    ...(data.description?.trim() ? { description: data.description.trim() } : {}),
+  };
+}
+
 const defaultFormValues = (): CreateOutstandingPaymentInput => ({
   tender: '',
   siteNameRaw: '',
@@ -127,7 +147,8 @@ export default function OutstandingPaymentsPage() {
       toast.success('Outstanding payment added');
       closeModal();
     },
-    onError: () => toast.error('Failed to add outstanding payment'),
+    onError: (error: { response?: { data?: { message?: string } } }) =>
+      toast.error(error.response?.data?.message ?? 'Failed to add outstanding payment'),
   });
 
   const deleteMutation = useMutation({
@@ -269,7 +290,7 @@ export default function OutstandingPaymentsPage() {
         onClose={closeModal}
         title="Add Outstanding Payment"
         size="lg"
-        onSubmit={form.handleSubmit((d) => createMutation.mutate(d))}
+        onSubmit={form.handleSubmit((d) => createMutation.mutate(prepareCreatePayload(d)))}
         footer={
           <ModalFormFooter
             onCancel={closeModal}
@@ -301,6 +322,7 @@ export default function OutstandingPaymentsPage() {
                 error={form.formState.errors.siteNameRaw?.message}
               />
               <input type="hidden" {...form.register('siteNameRaw')} />
+              <input type="hidden" {...form.register('site')} />
             </div>
             {selectedTender && (
               <p className="mt-3 text-sm text-muted">
@@ -324,6 +346,7 @@ export default function OutstandingPaymentsPage() {
                 label="Payment Date"
                 type="date"
                 error={form.formState.errors.paymentDate?.message}
+                defaultValue={toDateInputValue(new Date())}
                 {...form.register('paymentDate', { valueAsDate: true })}
               />
             </div>

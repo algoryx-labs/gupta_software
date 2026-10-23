@@ -43,62 +43,47 @@ export async function list(filters: OutstandingPaymentFilterInput) {
   return { data, meta: buildPaginationMeta(page, limit, total) };
 }
 
+function buildCreatePayload(input: CreateOutstandingPaymentInput, userId: string) {
+  const createdBy = resolveCreatedByRef(userId);
+
+  return {
+    tender: input.tender,
+    ...(input.site ? { site: input.site } : {}),
+    siteNameRaw: input.siteNameRaw,
+    amount: input.amount,
+    paymentDate: input.paymentDate,
+    ...(input.description ? { description: input.description } : {}),
+    ...(createdBy ? { createdBy } : {}),
+  };
+}
+
 export async function create(input: CreateOutstandingPaymentInput, userId: string) {
   const tender = await TenderModel.findById(input.tender);
   if (!tender) throw new ApiError(404, 'Tender not found');
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const payment = await OutstandingPaymentModel.create(buildCreatePayload(input, userId));
 
-  try {
-    const [payment] = await OutstandingPaymentModel.create(
-      [
-        {
-          ...input,
-          createdBy: resolveCreatedByRef(userId),
-        },
-      ],
-      { session },
-    );
+  await TenderModel.findByIdAndUpdate(input.tender, {
+    $inc: { paymentOutstanding: input.amount },
+  });
 
-    await TenderModel.findByIdAndUpdate(
-      input.tender,
-      { $inc: { paymentOutstanding: input.amount } },
-      { session },
-    );
-
-    await session.commitTransaction();
-    return payment;
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    session.endSession();
-  }
+  return OutstandingPaymentModel.findById(payment._id)
+    .populate('tender', 'tenderName tenderNo paymentOutstanding')
+    .populate('site', 'name code')
+    .populate('createdBy', 'name')
+    .lean();
 }
 
 export async function remove(id: string) {
   const payment = await OutstandingPaymentModel.findById(id);
   if (!payment) throw new ApiError(404, 'Outstanding payment not found');
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  await OutstandingPaymentModel.findByIdAndDelete(id);
+  await TenderModel.findByIdAndUpdate(payment.tender, {
+    $inc: { paymentOutstanding: -payment.amount },
+  });
 
-  try {
-    await OutstandingPaymentModel.findByIdAndDelete(id, { session });
-    await TenderModel.findByIdAndUpdate(
-      payment.tender,
-      { $inc: { paymentOutstanding: -payment.amount } },
-      { session },
-    );
-    await session.commitTransaction();
-    return payment;
-  } catch (error) {
-    await session.abortTransaction();
-    throw error;
-  } finally {
-    session.endSession();
-  }
+  return payment;
 }
 
 export async function getSummaryStats(dateFrom?: Date, dateTo?: Date, tender?: string) {
