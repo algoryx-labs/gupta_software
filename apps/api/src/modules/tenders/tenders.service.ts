@@ -47,6 +47,46 @@ function compareByStatusThenDate(
   return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dateDir;
 }
 
+const EXPIRING_SOON_DAYS = 60;
+
+function getNearestExpiryMs(tender: {
+  bgExpiryDate?: Date | string;
+  fdrExpiryDate?: Date | string;
+}): number | null {
+  const now = Date.now();
+  const windowEnd = now + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000;
+  const candidates: number[] = [];
+
+  for (const date of [tender.bgExpiryDate, tender.fdrExpiryDate]) {
+    if (!date) continue;
+    const ms = new Date(date).getTime();
+    if (ms >= now && ms <= windowEnd) candidates.push(ms);
+  }
+
+  return candidates.length ? Math.min(...candidates) : null;
+}
+
+function compareByExpiringSoon(
+  a: {
+    bgExpiryDate?: Date | string;
+    fdrExpiryDate?: Date | string;
+    createdAt: Date;
+  },
+  b: {
+    bgExpiryDate?: Date | string;
+    fdrExpiryDate?: Date | string;
+    createdAt: Date;
+  },
+) {
+  const aExpiry = getNearestExpiryMs(a);
+  const bExpiry = getNearestExpiryMs(b);
+
+  if (aExpiry !== null && bExpiry !== null) return aExpiry - bExpiry;
+  if (aExpiry !== null) return -1;
+  if (bExpiry !== null) return 1;
+  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+}
+
 function normalizeTender<T extends { sites?: ITender['sites'] }>(tender: T): T {
   return { ...tender, sites: tender.sites ?? [] };
 }
@@ -60,6 +100,21 @@ export async function list(filters: TenderFilterInput) {
   const { skip } = getPagination(page, limit);
   const filter = buildFilter(filters);
   const dateDir = sortOrder === 'asc' ? 1 : -1;
+
+  if (sortBy === 'expiringSoon') {
+    const [allData, total] = await Promise.all([
+      TenderModel.find(filter)
+        .populate('createdBy', 'name')
+        .populate('sites.site', 'name code')
+        .lean(),
+      TenderModel.countDocuments(filter),
+    ]);
+
+    const sorted = [...allData].sort(compareByExpiringSoon);
+    const data = sorted.slice(skip, skip + limit);
+
+    return { data: normalizeTenders(data), meta: buildPaginationMeta(page, limit, total) };
+  }
 
   if (filters.status) {
     const sort: Record<string, 1 | -1> = { [sortBy]: dateDir };
@@ -96,12 +151,15 @@ export async function listForExport(filters: TenderFilterInput) {
   const dateDir = filters.sortOrder === 'asc' ? 1 : -1;
   const data = await TenderModel.find(filter).populate('sites.site', 'name code').lean();
 
-  const sorted = filters.status
-    ? [...data].sort(
-        (a, b) =>
-          (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dateDir,
-      )
-    : [...data].sort((a, b) => compareByStatusThenDate(a, b, dateDir));
+  const sorted =
+    filters.sortBy === 'expiringSoon'
+      ? [...data].sort(compareByExpiringSoon)
+      : filters.status
+        ? [...data].sort(
+            (a, b) =>
+              (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dateDir,
+          )
+        : [...data].sort((a, b) => compareByStatusThenDate(a, b, dateDir));
 
   return normalizeTenders(sorted);
 }

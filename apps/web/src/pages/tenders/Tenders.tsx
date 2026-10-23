@@ -38,9 +38,12 @@ const statusFilterOptions = [
   { value: '', label: 'All statuses' },
 ];
 
-const uploadSortOptions = [
+type TenderSortMode = 'desc' | 'asc' | 'expiringSoon';
+
+const uploadSortOptions: Array<{ value: TenderSortMode; label: string }> = [
   { value: 'desc', label: 'Latest uploaded' },
   { value: 'asc', label: 'Oldest uploaded' },
+  { value: 'expiringSoon', label: 'Expiring soon' },
 ];
 
 const defaultSite = (): TenderSiteInput => ({
@@ -152,7 +155,7 @@ export default function TendersPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<TenderStatus | ''>(TenderStatus.ACTIVE);
-  const [uploadSort, setUploadSort] = useState<'asc' | 'desc'>('desc');
+  const [uploadSort, setUploadSort] = useState<TenderSortMode>('desc');
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -161,8 +164,8 @@ export default function TendersPage() {
   const listParams = {
     page,
     limit: 20,
-    sortBy: 'createdAt',
-    sortOrder: uploadSort,
+    sortBy: uploadSort === 'expiringSoon' ? 'expiringSoon' : 'createdAt',
+    sortOrder: uploadSort === 'expiringSoon' ? 'asc' : uploadSort,
     ...(search && { search }),
     ...(statusFilter && { status: statusFilter }),
   };
@@ -273,7 +276,18 @@ export default function TendersPage() {
     },
     { key: 'bgExpiryDate', header: 'BG Expiry', render: (r) => formatExpiryDate(r.bgExpiryDate) },
     { key: 'fdrExpiryDate', header: 'FDR Expiry', render: (r) => formatExpiryDate(r.fdrExpiryDate) },
-    { key: 'status', header: 'Status', render: (r) => <Badge variant={r.status}>{r.status}</Badge> },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (r) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant={r.status}>{r.status}</Badge>
+          {isInstrumentExpiringSoon(r.bgExpiryDate, r.fdrExpiryDate) && (
+            <Badge variant="expired">Expiring soon</Badge>
+          )}
+        </div>
+      ),
+    },
     {
       key: 'actions',
       header: '',
@@ -306,8 +320,8 @@ export default function TendersPage() {
             variant="secondary"
             onClick={async () => {
               const { data: rows } = await tendersApi.export({
-                sortBy: 'createdAt',
-                sortOrder: uploadSort,
+                sortBy: uploadSort === 'expiringSoon' ? 'expiringSoon' : 'createdAt',
+                sortOrder: uploadSort === 'expiringSoon' ? 'asc' : uploadSort,
                 ...(statusFilter && { status: statusFilter }),
               });
               exportToExcel(
@@ -356,12 +370,19 @@ export default function TendersPage() {
           options={uploadSortOptions}
           value={uploadSort}
           onChange={(e) => {
-            setUploadSort(e.target.value as 'asc' | 'desc');
+            setUploadSort(e.target.value as TenderSortMode);
             setPage(1);
           }}
           className="!w-44"
         />
       </div>
+
+      {uploadSort === 'expiringSoon' && (
+        <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          Showing tenders with BG or FDR expiring within 60 days first (nearest expiry on top).
+          Highlighted rows are expiring soon.
+        </p>
+      )}
 
       <DataTable
         columns={columns}
